@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import mysql.connector
 from mysql.connector import IntegrityError
+from openai import OpenAI
 from datetime import datetime, date, time
 
 # ============================================================
@@ -342,7 +343,8 @@ st.sidebar.title("FLOW MANAGER")
 
 st.sidebar.markdown(
     """
-    **Hệ thống giám sát và điều phối dòng khách tại điểm đến**
+    **Hệ thống quản lý và giảm tải
+    lượng khách tại điểm đến**
     """
 )
 
@@ -358,7 +360,8 @@ menu = st.sidebar.radio(
         "📍 Quản lý điểm đến",
         "📋 Lịch sử lượt khách",
         "📸 Địa điểm chụp ảnh đẹp Vũng Tàu",
-        "🍜 Món ăn địa phương & đặc sản Vũng Tàu"
+        "🍜 Món ăn địa phương & đặc sản Vũng Tàu",
+        "🤖 Chatbot du lịch Vũng Tàu"
     ]
 )
 
@@ -1636,6 +1639,149 @@ elif menu == "🍜 Món ăn địa phương & đặc sản Vũng Tàu":
                 st.write(f"**Mức giá:** {food['Mức giá']}")
                 st.write(f"**Thời điểm:** {food['Thời điểm']}")
                 st.write(f"**Mô tả:** {food['Mô tả']}")
+
+
+
+# ============================================================
+# CHATBOT DU LỊCH VŨNG TÀU
+# ============================================================
+
+elif menu == "🤖 Chatbot du lịch Vũng Tàu":
+
+    st.title("🤖 Chatbot du lịch Vũng Tàu")
+
+    st.caption(
+        "Hỏi AI về địa điểm tham quan, món ăn, chụp ảnh, "
+        "lịch trình và kinh nghiệm du lịch Vũng Tàu."
+    )
+
+    if "OPENAI_API_KEY" not in st.secrets:
+        st.error(
+            "Chưa tìm thấy OPENAI_API_KEY trong Streamlit Secrets."
+        )
+        st.stop()
+
+    client = OpenAI(
+        api_key=st.secrets["OPENAI_API_KEY"]
+    )
+
+    if "vt_chat_messages" not in st.session_state:
+        st.session_state.vt_chat_messages = [
+            {
+                "role": "assistant",
+                "content": (
+                    "Xin chào 👋 Tôi là trợ lý du lịch Vũng Tàu. "
+                    "Bạn muốn hỏi về địa điểm, món ăn hay lịch trình?"
+                )
+            }
+        ]
+
+    col_clear, _ = st.columns([1, 5])
+
+    with col_clear:
+        if st.button("🗑️ Xóa hội thoại"):
+            st.session_state.vt_chat_messages = [
+                {
+                    "role": "assistant",
+                    "content": (
+                        "Xin chào 👋 Tôi là trợ lý du lịch Vũng Tàu. "
+                        "Bạn muốn hỏi về địa điểm, món ăn hay lịch trình?"
+                    )
+                }
+            ]
+            st.rerun()
+
+    for message in st.session_state.vt_chat_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    prompt = st.chat_input(
+        "Ví dụ: Đi Vũng Tàu 2 ngày 1 đêm nên đi đâu?"
+    )
+
+    if prompt:
+
+        st.session_state.vt_chat_messages.append(
+            {
+                "role": "user",
+                "content": prompt
+            }
+        )
+
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Gửi một phần lịch sử hội thoại để AI hiểu ngữ cảnh.
+        recent_messages = st.session_state.vt_chat_messages[-10:]
+
+        conversation_text = "\n".join(
+            [
+                (
+                    "Người dùng: " + m["content"]
+                    if m["role"] == "user"
+                    else "Trợ lý: " + m["content"]
+                )
+                for m in recent_messages
+            ]
+        )
+
+        with st.chat_message("assistant"):
+
+            try:
+                with st.spinner("Đang trả lời..."):
+
+                    response = client.responses.create(
+                        model="gpt-5.6-luna",
+                        instructions="""
+Bạn là trợ lý du lịch Vũng Tàu trong ứng dụng Destination Flow Manager.
+
+Yêu cầu:
+- Trả lời bằng tiếng Việt, dễ hiểu và thân thiện.
+- Tập trung vào Vũng Tàu và khu vực lân cận.
+- Có thể tư vấn địa điểm tham quan, địa điểm chụp ảnh,
+  món ăn, đặc sản, lịch trình, thời gian đi và gợi ý hoạt động.
+- Nếu người dùng hỏi giá, giờ mở cửa, địa chỉ hoặc thông tin
+  có thể thay đổi theo thời gian mà bạn không chắc chắn,
+  hãy nói rõ rằng họ nên kiểm tra lại trước khi đi.
+- Không bịa thông tin.
+- Trả lời ngắn gọn, ưu tiên gợi ý thực tế.
+""",
+                        input=conversation_text
+                    )
+
+                    answer = response.output_text.strip()
+
+                    if not answer:
+                        answer = (
+                            "Mình chưa tạo được câu trả lời. "
+                            "Bạn thử hỏi lại theo cách khác nhé."
+                        )
+
+                    st.markdown(answer)
+
+                    st.session_state.vt_chat_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": answer
+                        }
+                    )
+
+            except Exception as e:
+                error_text = str(e)
+
+                if "insufficient_quota" in error_text.lower():
+                    st.error(
+                        "API hiện chưa có đủ quota/credits. "
+                        "Bạn cần kiểm tra Billing trên OpenAI Platform."
+                    )
+                elif "invalid_api_key" in error_text.lower():
+                    st.error(
+                        "OPENAI_API_KEY không hợp lệ. "
+                        "Hãy kiểm tra lại Streamlit Secrets."
+                    )
+                else:
+                    st.error("Không gọi được OpenAI API.")
+                    st.code(error_text)
 
 
 # ============================================================
