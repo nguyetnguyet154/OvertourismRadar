@@ -1,13 +1,10 @@
 import streamlit as st
-import pymysql
+import sqlite3
 import pandas as pd
-
 from datetime import datetime, date, time
-from pymysql.cursors import DictCursor
 
-st.image("VT2.jpg")
 # ============================================================
-# 1. CẤU HÌNH STREAMLIT
+# CẤU HÌNH
 # ============================================================
 
 st.set_page_config(
@@ -17,742 +14,380 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-
-# ============================================================
-# 2. THÔNG TIN KẾT NỐI AIVEN MYSQL
-# ============================================================
-
-DB_HOST = "mysql-29a6db25-tranthikimnguyet8-df0c.i.aivencloud.com"
-DB_PORT = 19586
-DB_USER = "avnadmin"
-DB_PASSWORD = "AVNS_6y8qIYGcoOj22F0rJKB"
-DB_NAME = "defaultdb"
+DB_NAME = "destination_flow.db"
 
 
 # ============================================================
-# 3. KẾT NỐI DATABASE
+# DATABASE
 # ============================================================
 
-@st.cache_resource(show_spinner=False)
 def get_connection():
-
-    return pymysql.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME,
-
-        charset="utf8mb4",
-
-        cursorclass=DictCursor,
-
-        connect_timeout=15,
-        read_timeout=30,
-        write_timeout=30,
-
-        autocommit=False
-    )
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-def reconnect():
+def init_database():
 
-    try:
-        get_connection.clear()
-    except Exception:
-        pass
+    conn = get_connection()
+    cursor = conn.cursor()
 
-    return get_connection()
+    # --------------------------------------------------------
+    # BẢNG ĐIỂM ĐẾN
+    # --------------------------------------------------------
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS destinations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            location TEXT NOT NULL,
+            category TEXT NOT NULL,
+            capacity INTEGER NOT NULL,
+            warning_level INTEGER NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'Hoạt động'
+        )
+    """)
 
-# ============================================================
-# 4. CHẠY SQL
-# ============================================================
+    # --------------------------------------------------------
+    # BẢNG LƯỢT KHÁCH
+    # --------------------------------------------------------
 
-def execute_query(
-    query,
-    params=None,
-    fetch=False,
-    many=False
-):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS visits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            destination_id INTEGER NOT NULL,
+            visitor_name TEXT,
+            visitor_group TEXT,
+            number_of_people INTEGER NOT NULL,
+            visit_date TEXT NOT NULL,
+            visit_time TEXT NOT NULL,
+            time_slot TEXT NOT NULL,
+            status TEXT DEFAULT 'Đã ghi nhận',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(destination_id)
+            REFERENCES destinations(id)
+        )
+    """)
 
-    connection = None
+    # --------------------------------------------------------
+    # BẢNG KHUNG GIỜ
+    # --------------------------------------------------------
 
-    try:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS time_slots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slot_name TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            max_people INTEGER NOT NULL
+        )
+    """)
 
-        connection = get_connection()
+    conn.commit()
 
-        with connection.cursor() as cursor:
+    # --------------------------------------------------------
+    # DỮ LIỆU MẪU
+    # --------------------------------------------------------
 
-            if many:
-                cursor.executemany(
-                    query,
-                    params
-                )
+    destination_count = cursor.execute(
+        "SELECT COUNT(*) FROM destinations"
+    ).fetchone()[0]
 
-            else:
-                cursor.execute(
-                    query,
-                    params
-                )
+    if destination_count == 0:
 
-            if fetch:
-                result = cursor.fetchall()
+        destinations = [
 
-            else:
-                result = cursor.lastrowid
+            (
+                "Thích Ca Phật Đài",
+                "Vũng Tàu",
+                "Tâm linh",
+                1000,
+                800,
+                "Điểm tham quan tâm linh nổi tiếng tại Vũng Tàu",
+                "Hoạt động"
+            ),
 
-        connection.commit()
+            (
+                "Bãi Sau Vũng Tàu",
+                "Vũng Tàu",
+                "Biển",
+                5000,
+                4000,
+                "Khu vực biển có lượng khách cao vào cuối tuần",
+                "Hoạt động"
+            ),
 
-        return result
+            (
+                "Hồ Mây Park",
+                "Vũng Tàu",
+                "Vui chơi",
+                3000,
+                2400,
+                "Khu vui chơi và du lịch sinh thái",
+                "Hoạt động"
+            ),
 
-    except pymysql.MySQLError as e:
+            (
+                "Khu du lịch Bình Châu",
+                "Xuyên Mộc",
+                "Sinh thái",
+                2500,
+                2000,
+                "Khu du lịch sinh thái và nghỉ dưỡng",
+                "Hoạt động"
+            ),
 
-        if connection:
-            connection.rollback()
+            (
+                "Long Hải",
+                "Long Điền",
+                "Biển",
+                3500,
+                2800,
+                "Điểm du lịch biển và nghỉ dưỡng",
+                "Hoạt động"
+            ),
 
-        # Thử kết nối lại một lần
-        try:
-
-            connection = reconnect()
-
-            with connection.cursor() as cursor:
-
-                if many:
-                    cursor.executemany(
-                        query,
-                        params
-                    )
-
-                else:
-                    cursor.execute(
-                        query,
-                        params
-                    )
-
-                if fetch:
-                    result = cursor.fetchall()
-
-                else:
-                    result = cursor.lastrowid
-
-            connection.commit()
-
-            return result
-
-        except Exception as retry_error:
-
-            if connection:
-                connection.rollback()
-
-            st.error(
-                f"❌ Lỗi MySQL: {retry_error}"
+            (
+                "Hồ Tràm",
+                "Xuyên Mộc",
+                "Nghỉ dưỡng",
+                4000,
+                3200,
+                "Khu vực nghỉ dưỡng ven biển",
+                "Hoạt động"
             )
-
-            return None
-
-    except Exception as e:
-
-        if connection:
-            connection.rollback()
-
-        st.error(
-            f"❌ Lỗi hệ thống: {e}"
-        )
-
-        return None
-
-
-# ============================================================
-# 5. KHỞI TẠO DATABASE
-# ============================================================
-
-def initialize_database():
-
-    connection = None
-
-    try:
-
-        connection = get_connection()
-
-        with connection.cursor() as cursor:
-
-            # ------------------------------------------------
-            # BẢNG ĐIỂM ĐẾN
-            # ------------------------------------------------
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS destinations (
-
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-
-                    name VARCHAR(255) NOT NULL UNIQUE,
-
-                    location VARCHAR(255) NOT NULL,
-
-                    category VARCHAR(100) NOT NULL,
-
-                    capacity INT NOT NULL,
-
-                    warning_level INT NOT NULL,
-
-                    description TEXT,
-
-                    status VARCHAR(50)
-                    DEFAULT 'Hoạt động',
-
-                    created_at DATETIME
-                    DEFAULT CURRENT_TIMESTAMP,
-
-                    INDEX idx_destination_status (status)
-
-                ) ENGINE=InnoDB
-                DEFAULT CHARSET=utf8mb4
-                COLLATE=utf8mb4_unicode_ci
-            """)
-
-            # ------------------------------------------------
-            # BẢNG KHUNG GIỜ
-            # ------------------------------------------------
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS time_slots (
-
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-
-                    slot_name VARCHAR(100) NOT NULL,
-
-                    start_time TIME NOT NULL,
-
-                    end_time TIME NOT NULL,
-
-                    max_people INT NOT NULL
-
-                ) ENGINE=InnoDB
-                DEFAULT CHARSET=utf8mb4
-                COLLATE=utf8mb4_unicode_ci
-            """)
-
-            # ------------------------------------------------
-            # BẢNG LƯỢT KHÁCH
-            # ------------------------------------------------
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS visits (
-
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-
-                    destination_id INT NOT NULL,
-
-                    visitor_name VARCHAR(255),
-
-                    visitor_group VARCHAR(100),
-
-                    number_of_people INT NOT NULL,
-
-                    visit_date DATE NOT NULL,
-
-                    visit_time TIME NOT NULL,
-
-                    time_slot VARCHAR(100) NOT NULL,
-
-                    status VARCHAR(50)
-                    DEFAULT 'Đã ghi nhận',
-
-                    created_at DATETIME
-                    DEFAULT CURRENT_TIMESTAMP,
-
-                    CONSTRAINT fk_visit_destination
-
-                    FOREIGN KEY (destination_id)
-
-                    REFERENCES destinations(id)
-
-                    ON DELETE CASCADE,
-
-                    INDEX idx_visit_date (visit_date),
-
-                    INDEX idx_visit_destination (destination_id),
-
-                    INDEX idx_visit_slot (time_slot)
-
-                ) ENGINE=InnoDB
-                DEFAULT CHARSET=utf8mb4
-                COLLATE=utf8mb4_unicode_ci
-            """)
-
-            # ------------------------------------------------
-            # DỮ LIỆU ĐIỂM ĐẾN MẪU
-            # ------------------------------------------------
-
-            cursor.execute("""
-                SELECT COUNT(*) AS total
-                FROM destinations
-            """)
-
-            destination_count = cursor.fetchone()["total"]
-
-            if destination_count == 0:
-
-                destinations = [
-
-                    (
-                        "Thích Ca Phật Đài",
-                        "Vũng Tàu",
-                        "Tâm linh",
-                        1000,
-                        800,
-                        "Điểm tham quan tâm linh nổi tiếng tại Vũng Tàu",
-                        "Hoạt động"
-                    ),
-
-                    (
-                        "Bãi Sau Vũng Tàu",
-                        "Vũng Tàu",
-                        "Biển",
-                        5000,
-                        4000,
-                        "Khu vực biển có lượng khách cao",
-                        "Hoạt động"
-                    ),
-
-                    (
-                        "Hồ Mây Park",
-                        "Vũng Tàu",
-                        "Vui chơi",
-                        3000,
-                        2400,
-                        "Khu vui chơi và du lịch sinh thái",
-                        "Hoạt động"
-                    ),
-
-                    (
-                        "Khu du lịch Bình Châu",
-                        "Xuyên Mộc",
-                        "Sinh thái",
-                        2500,
-                        2000,
-                        "Khu du lịch sinh thái và nghỉ dưỡng",
-                        "Hoạt động"
-                    ),
-
-                    (
-                        "Long Hải",
-                        "Long Điền",
-                        "Biển",
-                        3500,
-                        2800,
-                        "Điểm du lịch biển và nghỉ dưỡng",
-                        "Hoạt động"
-                    ),
-
-                    (
-                        "Hồ Tràm",
-                        "Xuyên Mộc",
-                        "Nghỉ dưỡng",
-                        4000,
-                        3200,
-                        "Khu vực nghỉ dưỡng ven biển",
-                        "Hoạt động"
-                    )
-                ]
-
-                cursor.executemany("""
-                    INSERT INTO destinations
-                    (
-                        name,
-                        location,
-                        category,
-                        capacity,
-                        warning_level,
-                        description,
-                        status
-                    )
-
-                    VALUES
-                    (
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s
-                    )
-                """, destinations)
-
-            # ------------------------------------------------
-            # KHUNG GIỜ MẪU
-            # ------------------------------------------------
-
-            cursor.execute("""
-                SELECT COUNT(*) AS total
-                FROM time_slots
-            """)
-
-            slot_count = cursor.fetchone()["total"]
-
-            if slot_count == 0:
-
-                slots = [
-
-                    (
-                        "Sáng sớm",
-                        "06:00:00",
-                        "09:00:00",
-                        1000
-                    ),
-
-                    (
-                        "Buổi sáng",
-                        "09:00:00",
-                        "12:00:00",
-                        1500
-                    ),
-
-                    (
-                        "Buổi trưa",
-                        "12:00:00",
-                        "14:00:00",
-                        1000
-                    ),
-
-                    (
-                        "Buổi chiều",
-                        "14:00:00",
-                        "17:00:00",
-                        1500
-                    ),
-
-                    (
-                        "Buổi tối",
-                        "17:00:00",
-                        "21:00:00",
-                        2000
-                    )
-                ]
-
-                cursor.executemany("""
-                    INSERT INTO time_slots
-                    (
-                        slot_name,
-                        start_time,
-                        end_time,
-                        max_people
-                    )
-
-                    VALUES
-                    (
-                        %s,
-                        %s,
-                        %s,
-                        %s
-                    )
-                """, slots)
-
-        connection.commit()
-
-        return True
-
-    except Exception as e:
-
-        if connection:
-            connection.rollback()
-
-        st.error(
-            "❌ Không thể khởi tạo Database MySQL."
-        )
-
-        st.error(
-            str(e)
-        )
-
-        return False
-
-
-# ============================================================
-# 6. KIỂM TRA KẾT NỐI
-# ============================================================
-
-def test_database():
-
-    try:
-
-        connection = get_connection()
-
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                "SELECT VERSION() AS version"
+        ]
+
+        cursor.executemany("""
+            INSERT INTO destinations
+            (
+                name,
+                location,
+                category,
+                capacity,
+                warning_level,
+                description,
+                status
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, destinations)
 
-            result = cursor.fetchone()
+    # --------------------------------------------------------
+    # KHUNG GIỜ
+    # --------------------------------------------------------
 
-        return result["version"]
+    slot_count = cursor.execute(
+        "SELECT COUNT(*) FROM time_slots"
+    ).fetchone()[0]
 
-    except Exception:
+    if slot_count == 0:
 
-        return None
+        slots = [
+            ("Sáng sớm", "06:00", "09:00", 1000),
+            ("Buổi sáng", "09:00", "12:00", 1500),
+            ("Buổi trưa", "12:00", "14:00", 1000),
+            ("Buổi chiều", "14:00", "17:00", 1500),
+            ("Buổi tối", "17:00", "21:00", 2000)
+        ]
+
+        cursor.executemany("""
+            INSERT INTO time_slots
+            (
+                slot_name,
+                start_time,
+                end_time,
+                max_people
+            )
+            VALUES (?, ?, ?, ?)
+        """, slots)
+
+    conn.commit()
+    conn.close()
+
+
+init_database()
 
 
 # ============================================================
-# 7. KHỞI TẠO
-# ============================================================
-
-database_ready = initialize_database()
-
-if not database_ready:
-
-    st.stop()
-
-
-# ============================================================
-# 8. CÁC HÀM LẤY DỮ LIỆU
+# DATABASE FUNCTIONS
 # ============================================================
 
 def get_destinations():
 
-    data = execute_query("""
-        SELECT
-            id,
-            name,
-            location,
-            category,
-            capacity,
-            warning_level,
-            description,
-            status,
-            created_at
+    conn = get_connection()
 
+    df = pd.read_sql_query("""
+        SELECT *
         FROM destinations
-
         ORDER BY name
-    """, fetch=True)
+    """, conn)
 
-    if data is None:
-        return pd.DataFrame()
+    conn.close()
 
-    return pd.DataFrame(data)
-
-
-def get_time_slots():
-
-    data = execute_query("""
-        SELECT
-            id,
-            slot_name,
-            start_time,
-            end_time,
-            max_people
-
-        FROM time_slots
-
-        ORDER BY start_time
-    """, fetch=True)
-
-    if data is None:
-        return pd.DataFrame()
-
-    return pd.DataFrame(data)
+    return df
 
 
 def get_visits():
 
-    data = execute_query("""
+    conn = get_connection()
+
+    df = pd.read_sql_query("""
         SELECT
-
             v.id,
-
             d.name AS destination,
-
             d.location,
-
             d.category,
-
             v.visitor_name,
-
             v.visitor_group,
-
             v.number_of_people,
-
             v.visit_date,
-
             v.visit_time,
-
             v.time_slot,
-
             v.status,
-
             v.created_at
-
         FROM visits v
+        JOIN destinations d
+        ON v.destination_id = d.id
+        ORDER BY v.id DESC
+    """, conn)
 
-        INNER JOIN destinations d
+    conn.close()
 
-            ON v.destination_id = d.id
+    return df
 
-        ORDER BY
-            v.visit_date DESC,
-            v.visit_time DESC,
-            v.id DESC
-    """, fetch=True)
 
-    if data is None:
-        return pd.DataFrame()
+def get_time_slots():
 
-    return pd.DataFrame(data)
+    conn = get_connection()
+
+    df = pd.read_sql_query("""
+        SELECT *
+        FROM time_slots
+        ORDER BY start_time
+    """, conn)
+
+    conn.close()
+
+    return df
 
 
 # ============================================================
-# 9. TÍNH LƯỢNG KHÁCH
+# XÁC ĐỊNH KHUNG GIỜ
+# ============================================================
+
+def get_current_time_slot():
+
+    now = datetime.now().time()
+
+    slots = get_time_slots()
+
+    for _, row in slots.iterrows():
+
+        start = datetime.strptime(
+            row["start_time"],
+            "%H:%M"
+        ).time()
+
+        end = datetime.strptime(
+            row["end_time"],
+            "%H:%M"
+        ).time()
+
+        if start <= now <= end:
+            return row["slot_name"]
+
+    return "Ngoài khung giờ"
+
+
+# ============================================================
+# TÍNH LƯỢNG KHÁCH
 # ============================================================
 
 def get_today_visitors():
 
-    today = date.today()
+    today = date.today().strftime("%Y-%m-%d")
 
-    result = execute_query("""
-        SELECT
-            COALESCE(
-                SUM(number_of_people),
-                0
-            ) AS total
+    conn = get_connection()
 
+    result = conn.execute("""
+        SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
+        WHERE visit_date = ?
+    """, (today,)).fetchone()[0]
 
-        WHERE visit_date = %s
+    conn.close()
 
-        AND status != 'Đã hủy'
-    """, (today,), fetch=True)
-
-    if not result:
-        return 0
-
-    return int(result[0]["total"] or 0)
+    return int(result)
 
 
-def get_destination_visitors(
-    destination_id,
-    selected_date=None
-):
+def get_destination_visitors(destination_id):
 
-    if selected_date is None:
-        selected_date = date.today()
+    today = date.today().strftime("%Y-%m-%d")
 
-    result = execute_query("""
-        SELECT
+    conn = get_connection()
 
-            COALESCE(
-                SUM(number_of_people),
-                0
-            ) AS total
-
+    result = conn.execute("""
+        SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
-
-        WHERE destination_id = %s
-
-        AND visit_date = %s
-
+        WHERE destination_id = ?
+        AND visit_date = ?
         AND status != 'Đã hủy'
     """, (
         destination_id,
-        selected_date
-    ), fetch=True)
+        today
+    )).fetchone()[0]
 
-    if not result:
-        return 0
+    conn.close()
 
-    return int(result[0]["total"] or 0)
+    return int(result)
 
 
-def get_slot_visitors(
-    destination_id,
-    slot_name,
-    selected_date=None
-):
+def get_slot_visitors(destination_id, slot_name):
 
-    if selected_date is None:
-        selected_date = date.today()
+    today = date.today().strftime("%Y-%m-%d")
 
-    result = execute_query("""
-        SELECT
+    conn = get_connection()
 
-            COALESCE(
-                SUM(number_of_people),
-                0
-            ) AS total
-
+    result = conn.execute("""
+        SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
-
-        WHERE destination_id = %s
-
-        AND time_slot = %s
-
-        AND visit_date = %s
-
+        WHERE destination_id = ?
+        AND time_slot = ?
+        AND visit_date = ?
         AND status != 'Đã hủy'
     """, (
         destination_id,
         slot_name,
-        selected_date
-    ), fetch=True)
+        today
+    )).fetchone()[0]
 
-    if not result:
-        return 0
+    conn.close()
 
-    return int(result[0]["total"] or 0)
+    return int(result)
 
 
 # ============================================================
-# 10. PHÂN LOẠI MỨC ĐỘ QUÁ TẢI
+# PHÂN LOẠI MỨC ĐỘ
 # ============================================================
 
-def get_load_status(
-    current,
-    warning,
-    capacity
-):
+def get_load_status(current, warning, capacity):
 
-    if capacity <= 0:
-        return "⚫ Không xác định"
-
-    percentage = (
-        current / capacity * 100
-    )
-
-    if percentage >= 100:
-
+    if current >= capacity:
         return "🔴 QUÁ TẢI"
 
-    elif percentage >= 80:
-
+    elif current >= warning:
         return "🟠 CAO"
 
-    elif percentage >= 50:
-
+    elif current >= warning * 0.7:
         return "🟡 TRUNG BÌNH"
 
     else:
-
         return "🟢 THẤP"
 
 
-def get_percentage(
-    current,
-    capacity
-):
-
-    if capacity <= 0:
-        return 0
-
-    return min(
-        current / capacity,
-        1
-    )
-
-
 # ============================================================
-# 11. THÊM LƯỢT KHÁCH
+# GHI NHẬN KHÁCH
 # ============================================================
 
 def add_visit(
@@ -765,7 +400,9 @@ def add_visit(
     time_slot
 ):
 
-    result = execute_query("""
+    conn = get_connection()
+
+    conn.execute("""
         INSERT INTO visits
         (
             destination_id,
@@ -775,20 +412,10 @@ def add_visit(
             visit_date,
             visit_time,
             time_slot,
-            status
+            status,
+            created_at
         )
-
-        VALUES
-        (
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            'Đã ghi nhận'
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         destination_id,
         visitor_name,
@@ -796,111 +423,56 @@ def add_visit(
         number_of_people,
         visit_date,
         visit_time,
-        time_slot
+        time_slot,
+        "Đã ghi nhận",
+        datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
     ))
 
-    return result is not None
+    conn.commit()
+    conn.close()
 
 
 # ============================================================
-# 12. HỦY LƯỢT KHÁCH
-# ============================================================
-
-def cancel_visit(visit_id):
-
-    result = execute_query("""
-        UPDATE visits
-
-        SET status = 'Đã hủy'
-
-        WHERE id = %s
-    """, (visit_id,))
-
-    return result is not None
-
-
-# ============================================================
-# 13. THÊM ĐIỂM ĐẾN
-# ============================================================
-
-def add_destination(
-    name,
-    location,
-    category,
-    capacity,
-    warning_level,
-    description
-):
-
-    result = execute_query("""
-        INSERT INTO destinations
-        (
-            name,
-            location,
-            category,
-            capacity,
-            warning_level,
-            description,
-            status
-        )
-
-        VALUES
-        (
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            'Hoạt động'
-        )
-    """, (
-        name,
-        location,
-        category,
-        capacity,
-        warning_level,
-        description
-    ))
-
-    return result is not None
-
-
-# ============================================================
-# 14. SIDEBAR
+# GIAO DIỆN SIDEBAR
 # ============================================================
 
 st.sidebar.title("🌍 DESTINATION")
 st.sidebar.title("FLOW MANAGER")
 
-st.sidebar.caption(
-    "Quản lý và giảm tải khách tại điểm đến"
+st.sidebar.markdown(
+    """
+    **Hệ thống quản lý và giảm tải
+    lượng khách tại điểm đến**
+    """
 )
 
 st.sidebar.divider()
 
 menu = st.sidebar.radio(
-    "📌 CHỨC NĂNG",
+    "📌 Chức năng",
     [
         "📊 Dashboard",
         "🚦 Giám sát điểm đến",
         "👥 Ghi nhận khách",
         "📅 Phân luồng theo giờ",
         "📍 Quản lý điểm đến",
-        "📋 Lịch sử lượt khách",
-        "🗄️ Database"
+        "📋 Lịch sử lượt khách"
     ]
 )
 
 st.sidebar.divider()
 
-st.sidebar.success(
-    "🟢 MySQL Aiven đang được sử dụng"
+st.sidebar.info(
+    "💡 Mục tiêu:\n\n"
+    "Theo dõi → Cảnh báo → "
+    "Điều phối → Giảm quá tải"
 )
 
 
 # ============================================================
-# 15. DASHBOARD
+# DASHBOARD
 # ============================================================
 
 if menu == "📊 Dashboard":
@@ -908,51 +480,20 @@ if menu == "📊 Dashboard":
     st.title("🌍 Destination Flow Manager")
 
     st.caption(
-        "Hệ thống quản lý, giám sát và điều phối "
-        "lượng khách tại điểm đến du lịch"
+        "Hệ thống quản lý và điều phối lượng khách tại điểm đến du lịch"
     )
 
     destinations = get_destinations()
 
-    if destinations.empty:
-
-        st.warning(
-            "Chưa có dữ liệu điểm đến."
-        )
-
-        st.stop()
-
     today_visitors = get_today_visitors()
 
-    total_capacity = int(
-        destinations["capacity"].sum()
-    )
+    total_capacity = destinations["capacity"].sum()
 
     active_destinations = len(
         destinations[
             destinations["status"] == "Hoạt động"
         ]
     )
-
-    overloaded = 0
-    high_load = 0
-
-    for _, row in destinations.iterrows():
-
-        current = get_destination_visitors(
-            row["id"]
-        )
-
-        if current >= row["capacity"]:
-
-            overloaded += 1
-
-        elif (
-            current >=
-            row["warning_level"]
-        ):
-
-            high_load += 1
 
     # --------------------------------------------------------
     # KPI
@@ -961,35 +502,44 @@ if menu == "📊 Dashboard":
     col1, col2, col3, col4, col5 = st.columns(5)
 
     col1.metric(
-        "👥 KHÁCH HÔM NAY",
+        "👥 Khách hôm nay",
         f"{today_visitors:,}"
     )
 
     col2.metric(
-        "📍 ĐIỂM ĐẾN",
+        "📍 Điểm đến",
         active_destinations
     )
 
     col3.metric(
-        "🏟️ TỔNG SỨC CHỨA",
+        "🧍 Sức chứa",
         f"{total_capacity:,}"
     )
 
-    total_usage = (
-        today_visitors /
-        total_capacity *
-        100
-        if total_capacity > 0
-        else 0
+    # Công suất tổng
+    total_load = (
+        today_visitors / total_capacity * 100
+        if total_capacity > 0 else 0
     )
 
     col4.metric(
-        "📈 MỨC SỬ DỤNG",
-        f"{total_usage:.1f}%"
+        "📈 Mức sử dụng",
+        f"{total_load:.1f}%"
     )
 
+    overloaded = 0
+
+    for _, row in destinations.iterrows():
+
+        current = get_destination_visitors(
+            row["id"]
+        )
+
+        if current >= row["capacity"]:
+            overloaded += 1
+
     col5.metric(
-        "🔴 ĐIỂM QUÁ TẢI",
+        "🔴 Quá tải",
         overloaded
     )
 
@@ -999,9 +549,7 @@ if menu == "📊 Dashboard":
     # CẢNH BÁO
     # --------------------------------------------------------
 
-    st.subheader(
-        "🚨 TRUNG TÂM CẢNH BÁO"
-    )
+    st.subheader("🚨 Trung tâm cảnh báo")
 
     warning_found = False
 
@@ -1022,8 +570,8 @@ if menu == "📊 Dashboard":
             warning_found = True
 
             st.error(
-                f"🔴 **{row['name']}** đang quá tải: "
-                f"**{current:,}/{row['capacity']:,} khách**."
+                f"🔴 **{row['name']}** đang QUÁ TẢI: "
+                f"{current:,}/{row['capacity']:,} khách."
             )
 
         elif "CAO" in status:
@@ -1032,13 +580,13 @@ if menu == "📊 Dashboard":
 
             st.warning(
                 f"🟠 **{row['name']}** đang có lượng khách cao: "
-                f"**{current:,}/{row['capacity']:,} khách**."
+                f"{current:,}/{row['capacity']:,}."
             )
 
     if not warning_found:
 
         st.success(
-            "🟢 Hiện chưa phát hiện điểm đến có nguy cơ quá tải."
+            "🟢 Chưa phát hiện điểm đến có nguy cơ quá tải."
         )
 
     st.divider()
@@ -1047,9 +595,7 @@ if menu == "📊 Dashboard":
     # BẢNG ĐIỂM ĐẾN
     # --------------------------------------------------------
 
-    st.subheader(
-        "📍 TÌNH TRẠNG ĐIỂM ĐẾN"
-    )
+    st.subheader("📍 Tình trạng các điểm đến")
 
     dashboard_data = []
 
@@ -1060,11 +606,8 @@ if menu == "📊 Dashboard":
         )
 
         percentage = (
-            current /
-            row["capacity"] *
-            100
-            if row["capacity"] > 0
-            else 0
+            current / row["capacity"] * 100
+            if row["capacity"] > 0 else 0
         )
 
         status = get_load_status(
@@ -1075,26 +618,20 @@ if menu == "📊 Dashboard":
 
         dashboard_data.append({
 
-            "Điểm đến":
-                row["name"],
+            "Điểm đến": row["name"],
 
-            "Khu vực":
-                row["location"],
+            "Khu vực": row["location"],
 
-            "Loại hình":
-                row["category"],
+            "Loại hình": row["category"],
 
-            "Khách hôm nay":
-                current,
+            "Khách hiện tại": current,
 
-            "Sức chứa":
-                row["capacity"],
+            "Sức chứa": row["capacity"],
 
-            "Mức sử dụng":
-                f"{percentage:.1f}%",
+            "Mức sử dụng": f"{percentage:.1f}%",
 
-            "Trạng thái":
-                status
+            "Trạng thái": status
+
         })
 
     dashboard_df = pd.DataFrame(
@@ -1107,41 +644,27 @@ if menu == "📊 Dashboard":
         hide_index=True
     )
 
-    st.divider()
-
     # --------------------------------------------------------
     # BIỂU ĐỒ
     # --------------------------------------------------------
 
-    st.subheader(
-        "📊 LƯỢNG KHÁCH THEO ĐIỂM ĐẾN"
-    )
+    st.subheader("📊 Lượng khách theo điểm đến")
 
     chart_df = dashboard_df[
-        [
-            "Điểm đến",
-            "Khách hôm nay"
-        ]
-    ].set_index(
-        "Điểm đến"
-    )
+        ["Điểm đến", "Khách hiện tại"]
+    ].set_index("Điểm đến")
 
-    st.bar_chart(
-        chart_df
-    )
-
-    st.divider()
+    st.bar_chart(chart_df)
 
     # --------------------------------------------------------
-    # ĐIỀU PHỐI
+    # GỢI Ý PHÂN LUỒNG
     # --------------------------------------------------------
 
-    st.subheader(
-        "🧭 GỢI Ý ĐIỀU PHỐI"
-    )
+    st.subheader("🧭 Gợi ý điều phối")
 
     high_destinations = []
-    available_destinations = []
+
+    low_destinations = []
 
     for _, row in destinations.iterrows():
 
@@ -1150,10 +673,7 @@ if menu == "📊 Dashboard":
         )
 
         percentage = (
-            current /
-            row["capacity"]
-            if row["capacity"] > 0
-            else 0
+            current / row["capacity"]
         )
 
         if percentage >= 0.8:
@@ -1164,77 +684,51 @@ if menu == "📊 Dashboard":
 
         elif percentage < 0.5:
 
-            available_destinations.append(
+            low_destinations.append(
                 row["name"]
             )
 
     if high_destinations:
 
         st.warning(
-            "⚠️ Nên kiểm soát lượng khách tại: "
-            + ", ".join(high_destinations)
+            "⚠️ Nên hạn chế tiếp nhận thêm khách "
+            f"tại: **{', '.join(high_destinations)}**"
         )
 
-    if available_destinations:
+    if low_destinations:
 
         st.info(
-            "🟢 Các điểm còn khả năng tiếp nhận khách: "
-            + ", ".join(available_destinations)
-        )
-
-    if not high_destinations:
-
-        st.success(
-            "🟢 Chưa có điểm đến nào vượt ngưỡng điều phối."
+            "🟢 Có thể điều hướng khách sang "
+            f"các điểm đang ít khách: **{', '.join(low_destinations)}**"
         )
 
 
 # ============================================================
-# 16. GIÁM SÁT ĐIỂM ĐẾN
+# GIÁM SÁT ĐIỂM ĐẾN
 # ============================================================
 
 elif menu == "🚦 Giám sát điểm đến":
 
-    st.title(
-        "🚦 Giám sát sức chứa điểm đến"
-    )
+    st.title("🚦 Giám sát sức chứa điểm đến")
 
     destinations = get_destinations()
 
-    if destinations.empty:
-
-        st.warning(
-            "Chưa có điểm đến."
-        )
-
-        st.stop()
-
-    selected_name = st.selectbox(
-        "📍 Chọn điểm đến",
+    selected = st.selectbox(
+        "Chọn điểm đến",
         destinations["name"].tolist()
     )
 
     destination = destinations[
-        destinations["name"] ==
-        selected_name
+        destinations["name"] == selected
     ].iloc[0]
 
-    selected_date = st.date_input(
-        "📅 Ngày theo dõi",
-        value=date.today()
-    )
-
     current = get_destination_visitors(
-        destination["id"],
-        selected_date
+        destination["id"]
     )
 
     percentage = (
-        current /
-        destination["capacity"] *
-        100
-        if destination["capacity"] > 0
-        else 0
+        current / destination["capacity"] * 100
+        if destination["capacity"] > 0 else 0
     )
 
     status = get_load_status(
@@ -1244,47 +738,45 @@ elif menu == "🚦 Giám sát điểm đến":
     )
 
     # --------------------------------------------------------
-    # KPI
+    # THÔNG TIN
     # --------------------------------------------------------
 
-    c1, c2, c3, c4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4)
 
-    c1.metric(
-        "👥 LƯỢT KHÁCH",
+    col1.metric(
+        "👥 Khách hôm nay",
         f"{current:,}"
     )
 
-    c2.metric(
-        "🏟️ SỨC CHỨA",
+    col2.metric(
+        "🏟️ Sức chứa",
         f"{destination['capacity']:,}"
     )
 
-    c3.metric(
-        "📈 SỬ DỤNG",
+    col3.metric(
+        "📈 Mức sử dụng",
         f"{percentage:.1f}%"
     )
 
-    c4.metric(
-        "🚦 TRẠNG THÁI",
+    col4.metric(
+        "🚦 Trạng thái",
         status
     )
 
     st.divider()
 
     # --------------------------------------------------------
-    # PROGRESS
+    # THANH SỨC CHỨA
     # --------------------------------------------------------
 
-    st.subheader(
-        "📊 MỨC SỬ DỤNG SỨC CHỨA"
+    st.subheader("📊 Mức sử dụng sức chứa")
+
+    progress = min(
+        percentage / 100,
+        1
     )
 
-    st.progress(
-        get_percentage(
-            current,
-            destination["capacity"]
-        )
-    )
+    st.progress(progress)
 
     if percentage >= 100:
 
@@ -1293,15 +785,15 @@ elif menu == "🚦 Giám sát điểm đến":
         )
 
         st.warning(
-            "Cần hạn chế tiếp nhận thêm khách "
-            "và cân nhắc phân luồng sang thời gian "
-            "hoặc điểm đến khác."
+            "Nên tạm thời hạn chế khách mới "
+            "và chuyển một phần khách sang điểm thay thế."
         )
 
     elif percentage >= 80:
 
         st.warning(
-            "🟠 Điểm đến gần mức quá tải."
+            "🟠 Lượng khách đang cao. "
+            "Nên kiểm soát lượt khách mới."
         )
 
     elif percentage >= 50:
@@ -1313,7 +805,7 @@ elif menu == "🚦 Giám sát điểm đến":
     else:
 
         st.success(
-            "🟢 Điểm đến còn nhiều khả năng tiếp nhận."
+            "🟢 Điểm đến còn nhiều khả năng tiếp nhận khách."
         )
 
     st.divider()
@@ -1322,9 +814,7 @@ elif menu == "🚦 Giám sát điểm đến":
     # KHUNG GIỜ
     # --------------------------------------------------------
 
-    st.subheader(
-        "⏰ PHÂN BỐ KHÁCH THEO KHUNG GIỜ"
-    )
+    st.subheader("⏰ Phân bố khách theo khung giờ")
 
     slots = get_time_slots()
 
@@ -1334,33 +824,8 @@ elif menu == "🚦 Giám sát điểm đến":
 
         visitors = get_slot_visitors(
             destination["id"],
-            slot["slot_name"],
-            selected_date
+            slot["slot_name"]
         )
-
-        percentage_slot = (
-            visitors /
-            slot["max_people"] *
-            100
-            if slot["max_people"] > 0
-            else 0
-        )
-
-        if percentage_slot >= 100:
-
-            slot_status = "🔴 Đầy"
-
-        elif percentage_slot >= 80:
-
-            slot_status = "🟠 Gần đầy"
-
-        elif percentage_slot >= 50:
-
-            slot_status = "🟡 Trung bình"
-
-        else:
-
-            slot_status = "🟢 Còn chỗ"
 
         slot_data.append({
 
@@ -1371,17 +836,12 @@ elif menu == "🚦 Giám sát điểm đến":
                 f"{slot['start_time']} - "
                 f"{slot['end_time']}",
 
-            "Khách":
+            "Số khách":
                 visitors,
 
             "Giới hạn":
-                slot["max_people"],
+                slot["max_people"]
 
-            "Sử dụng":
-                f"{percentage_slot:.1f}%",
-
-            "Trạng thái":
-                slot_status
         })
 
     slot_df = pd.DataFrame(
@@ -1395,50 +855,36 @@ elif menu == "🚦 Giám sát điểm đến":
     )
 
     st.bar_chart(
-        slot_df.set_index(
-            "Khung giờ"
-        )[["Khách"]]
+        slot_df.set_index("Khung giờ")[
+            ["Số khách"]
+        ]
     )
 
 
 # ============================================================
-# 17. GHI NHẬN KHÁCH
+# GHI NHẬN KHÁCH
 # ============================================================
 
 elif menu == "👥 Ghi nhận khách":
 
-    st.title(
-        "👥 Ghi nhận lượt khách"
-    )
+    st.title("👥 Ghi nhận lượt khách")
 
     st.info(
-        "Nhập thông tin khách/đoàn khách. "
-        "Dữ liệu sẽ được lưu trực tiếp vào MySQL Aiven."
+        "Nhập thông tin đoàn khách để hệ thống "
+        "tự động cập nhật lượng khách tại điểm đến."
     )
 
     destinations = get_destinations()
 
-    if destinations.empty:
-
-        st.warning(
-            "Chưa có điểm đến."
-        )
-
-        st.stop()
-
-    with st.form(
-        "visitor_form",
-        clear_on_submit=True
-    ):
+    with st.form("visitor_form"):
 
         destination_name = st.selectbox(
-            "📍 Điểm đến *",
+            "📍 Điểm đến",
             destinations["name"].tolist()
         )
 
         destination = destinations[
-            destinations["name"] ==
-            destination_name
+            destinations["name"] == destination_name
         ].iloc[0]
 
         col1, col2 = st.columns(2)
@@ -1446,8 +892,8 @@ elif menu == "👥 Ghi nhận khách":
         with col1:
 
             visitor_name = st.text_input(
-                "👤 Người đại diện",
-                placeholder="Nguyễn Văn A"
+                "Tên người đại diện / trưởng đoàn",
+                placeholder="Ví dụ: Nguyễn Văn A"
             )
 
             visitor_group = st.selectbox(
@@ -1465,167 +911,131 @@ elif menu == "👥 Ghi nhận khách":
         with col2:
 
             number_of_people = st.number_input(
-                "👥 Số lượng người *",
+                "Số lượng người",
                 min_value=1,
                 max_value=10000,
                 value=1
             )
 
             visit_date = st.date_input(
-                "📅 Ngày đến",
+                "Ngày đến",
                 value=date.today()
             )
 
             visit_time = st.time_input(
-                "⏰ Thời gian đến",
+                "Thời gian đến",
                 value=datetime.now().time()
             )
 
         slots = get_time_slots()
 
+        slot_names = slots[
+            "slot_name"
+        ].tolist()
+
         time_slot = st.selectbox(
-            "🕐 Khung giờ",
-            slots["slot_name"].tolist()
+            "⏰ Khung giờ dự kiến",
+            slot_names
         )
 
         submitted = st.form_submit_button(
-            "✅ GHI NHẬN LƯỢT KHÁCH",
-            type="primary",
-            use_container_width=True
+            "✅ Ghi nhận lượt khách",
+            type="primary"
         )
 
         if submitted:
 
-            if number_of_people <= 0:
+            current = get_destination_visitors(
+                destination["id"]
+            )
+
+            new_total = (
+                current + number_of_people
+            )
+
+            if new_total >= destination["capacity"]:
 
                 st.error(
-                    "Số lượng người phải lớn hơn 0."
+                    f"🔴 Cảnh báo: nếu ghi nhận đoàn này, "
+                    f"điểm đến sẽ đạt {new_total:,}/"
+                    f"{destination['capacity']:,} khách."
                 )
 
-            else:
-
-                current = get_destination_visitors(
-                    destination["id"],
-                    visit_date
+                confirm = st.checkbox(
+                    "Tôi xác nhận vẫn muốn ghi nhận lượt khách này."
                 )
 
-                new_total = (
-                    current +
-                    number_of_people
-                )
+                if confirm:
 
-                capacity = destination[
-                    "capacity"
-                ]
-
-                if new_total > capacity:
-
-                    st.error(
-                        f"🔴 CẢNH BÁO QUÁ TẢI!\n\n"
-                        f"Hiện tại: {current:,} khách\n\n"
-                        f"Đoàn mới: {number_of_people:,} khách\n\n"
-                        f"Sau khi ghi nhận: "
-                        f"{new_total:,} khách\n\n"
-                        f"Sức chứa: "
-                        f"{capacity:,} khách"
-                    )
-
-                    confirm = st.checkbox(
-                        "⚠️ Tôi xác nhận vẫn muốn ghi nhận đoàn khách này."
-                    )
-
-                    if confirm:
-
-                        success = add_visit(
-                            destination["id"],
-                            visitor_name,
-                            visitor_group,
-                            number_of_people,
-                            visit_date,
-                            visit_time,
-                            time_slot
-                        )
-
-                        if success:
-
-                            st.success(
-                                "✅ Đã ghi nhận lượt khách."
-                            )
-
-                            st.rerun()
-
-                else:
-
-                    success = add_visit(
+                    add_visit(
                         destination["id"],
                         visitor_name,
                         visitor_group,
                         number_of_people,
-                        visit_date,
-                        visit_time,
+                        visit_date.strftime("%Y-%m-%d"),
+                        visit_time.strftime("%H:%M"),
                         time_slot
                     )
 
-                    if success:
+                    st.success(
+                        "Đã ghi nhận lượt khách."
+                    )
 
-                        remaining = (
-                            capacity -
-                            new_total
-                        )
+            else:
 
-                        st.success(
-                            "✅ Ghi nhận khách thành công!"
-                        )
+                add_visit(
+                    destination["id"],
+                    visitor_name,
+                    visitor_group,
+                    number_of_people,
+                    visit_date.strftime("%Y-%m-%d"),
+                    visit_time.strftime("%H:%M"),
+                    time_slot
+                )
 
-                        st.info(
-                            f"Điểm đến còn khoảng "
-                            f"**{remaining:,} người** "
-                            "theo sức chứa thiết lập."
-                        )
+                st.success(
+                    "✅ Đã ghi nhận lượt khách thành công."
+                )
 
-                        st.rerun()
+                remaining = (
+                    destination["capacity"]
+                    - new_total
+                )
+
+                st.info(
+                    f"Điểm đến còn khoảng "
+                    f"**{remaining:,} lượt** "
+                    "theo sức chứa thiết lập."
+                )
+
+                st.rerun()
 
 
 # ============================================================
-# 18. PHÂN LUỒNG THEO GIỜ
+# PHÂN LUỒNG THEO GIỜ
 # ============================================================
 
 elif menu == "📅 Phân luồng theo giờ":
 
-    st.title(
-        "📅 Điều phối khách theo khung giờ"
-    )
+    st.title("📅 Điều phối khách theo khung giờ")
 
     st.write(
-        "Theo dõi số khách theo từng khung giờ "
-        "để hạn chế tình trạng tập trung quá đông."
+        "Mục tiêu là phân tán lượng khách, "
+        "tránh việc quá nhiều người tập trung "
+        "vào cùng một thời điểm."
     )
 
     destinations = get_destinations()
     slots = get_time_slots()
 
-    if destinations.empty:
-
-        st.warning(
-            "Chưa có điểm đến."
-        )
-
-        st.stop()
-
-    selected_name = st.selectbox(
-        "📍 Điểm đến",
+    selected_destination = st.selectbox(
+        "📍 Chọn điểm đến",
         destinations["name"].tolist()
     )
 
     destination = destinations[
-        destinations["name"] ==
-        selected_name
+        destinations["name"] == selected_destination
     ].iloc[0]
-
-    selected_date = st.date_input(
-        "📅 Ngày",
-        value=date.today()
-    )
 
     st.divider()
 
@@ -1635,35 +1045,31 @@ elif menu == "📅 Phân luồng theo giờ":
 
         visitors = get_slot_visitors(
             destination["id"],
-            slot["slot_name"],
-            selected_date
+            slot["slot_name"]
         )
 
-        limit = slot["max_people"]
+        capacity = slot["max_people"]
 
         percentage = (
-            visitors /
-            limit *
-            100
-            if limit > 0
-            else 0
+            visitors / capacity * 100
+            if capacity > 0 else 0
         )
 
         if percentage >= 100:
 
-            status = "🔴 ĐẦY"
+            status = "🔴 Đầy"
 
         elif percentage >= 80:
 
-            status = "🟠 GẦN ĐẦY"
+            status = "🟠 Gần đầy"
 
         elif percentage >= 50:
 
-            status = "🟡 TRUNG BÌNH"
+            status = "🟡 Trung bình"
 
         else:
 
-            status = "🟢 CÒN NHIỀU CHỖ"
+            status = "🟢 Còn nhiều chỗ"
 
         data.append({
 
@@ -1678,13 +1084,14 @@ elif menu == "📅 Phân luồng theo giờ":
                 visitors,
 
             "Giới hạn":
-                limit,
+                capacity,
 
-            "Mức sử dụng":
+            "Sử dụng":
                 f"{percentage:.1f}%",
 
             "Trạng thái":
                 status
+
         })
 
     slot_df = pd.DataFrame(data)
@@ -1698,114 +1105,103 @@ elif menu == "📅 Phân luồng theo giờ":
     st.divider()
 
     st.subheader(
-        "🧭 KHUYẾN NGHỊ ĐIỀU PHỐI"
+        "🧭 Khuyến nghị điều phối"
     )
 
     for _, row in slot_df.iterrows():
 
-        if row["Trạng thái"] == "🔴 ĐẦY":
+        if "Đầy" in row["Trạng thái"]:
 
             st.error(
-                f"🔴 **{row['Khung giờ']}** đã đạt giới hạn. "
-                "Nên hạn chế tiếp nhận thêm khách."
+                f"🔴 **{row['Khung giờ']}** đang đầy. "
+                "Nên hạn chế khách mới trong khung giờ này."
             )
 
-        elif row["Trạng thái"] == "🟠 GẦN ĐẦY":
+        elif "Gần đầy" in row["Trạng thái"]:
 
             st.warning(
-                f"🟠 **{row['Khung giờ']}** gần đầy. "
-                "Nên khuyến khích khách chuyển sang khung giờ khác."
+                f"🟠 **{row['Khung giờ']}** gần đạt giới hạn. "
+                "Có thể hướng khách sang khung giờ khác."
             )
 
-        elif row["Trạng thái"] == "🟢 CÒN NHIỀU CHỖ":
+        elif "Còn nhiều" in row["Trạng thái"]:
 
             st.success(
-                f"🟢 **{row['Khung giờ']}** còn nhiều khả năng "
-                "tiếp nhận khách."
+                f"🟢 **{row['Khung giờ']}** còn khả năng "
+                "tiếp nhận thêm khách."
             )
 
     st.divider()
 
     st.subheader(
-        "💡 MÔ HÌNH PHÂN LUỒNG"
+        "💡 Nguyên tắc phân luồng"
     )
 
     st.markdown(
         """
-        **Điểm đến quá đông**
+        **Nếu một khung giờ quá đông:**
 
-        🔴 Phát hiện quá tải  
+        🔴 Giảm tiếp nhận khách mới  
         ↓  
-        🟠 Cảnh báo nhân viên điều phối  
+        🟠 Đề xuất khung giờ ít khách hơn  
         ↓  
-        🕐 Đề xuất khung giờ ít khách  
+        🟢 Nếu vẫn đông, đề xuất điểm đến thay thế  
         ↓  
-        📍 Xem xét điểm đến thay thế  
-        ↓  
-        🟢 Phân tán dòng khách  
-        ↓  
-        📊 Theo dõi lại dữ liệu
+        📊 Theo dõi lại lượng khách
         """
     )
 
 
 # ============================================================
-# 19. QUẢN LÝ ĐIỂM ĐẾN
+# QUẢN LÝ ĐIỂM ĐẾN
 # ============================================================
 
 elif menu == "📍 Quản lý điểm đến":
 
-    st.title(
-        "📍 Quản lý điểm đến"
-    )
+    st.title("📍 Quản lý điểm đến")
 
     destinations = get_destinations()
 
-    if not destinations.empty:
+    st.subheader("Danh sách điểm đến")
 
-        display_df = destinations[
-            [
-                "name",
-                "location",
-                "category",
-                "capacity",
-                "warning_level",
-                "status"
-            ]
-        ].copy()
-
-        display_df.columns = [
-            "Điểm đến",
-            "Khu vực",
-            "Loại hình",
-            "Sức chứa",
-            "Ngưỡng cảnh báo",
-            "Trạng thái"
+    display_df = destinations[
+        [
+            "name",
+            "location",
+            "category",
+            "capacity",
+            "warning_level",
+            "status"
         ]
+    ].copy()
 
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True
-        )
+    display_df.columns = [
+        "Điểm đến",
+        "Khu vực",
+        "Loại hình",
+        "Sức chứa",
+        "Ngưỡng cảnh báo",
+        "Trạng thái"
+    ]
+
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True
+    )
 
     st.divider()
 
-    st.subheader(
-        "➕ Thêm điểm đến"
-    )
+    st.subheader("➕ Thêm điểm đến")
 
-    with st.form(
-        "destination_form",
-        clear_on_submit=True
-    ):
+    with st.form("destination_form"):
 
         name = st.text_input(
-            "Tên điểm đến *"
+            "Tên điểm đến"
         )
 
         location = st.text_input(
-            "Khu vực *"
+            "Khu vực"
         )
 
         category = st.selectbox(
@@ -1827,7 +1223,7 @@ elif menu == "📍 Quản lý điểm đến":
         with col1:
 
             capacity = st.number_input(
-                "🏟️ Sức chứa tối đa",
+                "Sức chứa tối đa",
                 min_value=1,
                 value=1000
             )
@@ -1835,7 +1231,7 @@ elif menu == "📍 Quản lý điểm đến":
         with col2:
 
             warning_level = st.number_input(
-                "⚠️ Ngưỡng cảnh báo",
+                "Ngưỡng cảnh báo",
                 min_value=1,
                 value=800
             )
@@ -1845,7 +1241,7 @@ elif menu == "📍 Quản lý điểm đến":
         )
 
         submitted = st.form_submit_button(
-            "➕ THÊM ĐIỂM ĐẾN",
+            "➕ Thêm điểm đến",
             type="primary"
         )
 
@@ -1863,45 +1259,68 @@ elif menu == "📍 Quản lý điểm đến":
                     "Vui lòng nhập khu vực."
                 )
 
-            elif warning_level >= capacity:
+            elif warning_level > capacity:
 
                 st.error(
-                    "Ngưỡng cảnh báo nên nhỏ hơn sức chứa."
+                    "Ngưỡng cảnh báo không được "
+                    "lớn hơn sức chứa."
                 )
 
             else:
 
-                success = add_destination(
-                    name.strip(),
-                    location.strip(),
-                    category,
-                    capacity,
-                    warning_level,
-                    description.strip()
-                )
+                try:
 
-                if success:
+                    conn = get_connection()
+
+                    conn.execute("""
+                        INSERT INTO destinations
+                        (
+                            name,
+                            location,
+                            category,
+                            capacity,
+                            warning_level,
+                            description,
+                            status
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        name.strip(),
+                        location.strip(),
+                        category,
+                        capacity,
+                        warning_level,
+                        description,
+                        "Hoạt động"
+                    ))
+
+                    conn.commit()
+                    conn.close()
 
                     st.success(
-                        f"✅ Đã thêm điểm đến: {name}"
+                        f"Đã thêm điểm đến: {name}"
                     )
 
                     st.rerun()
 
+                except sqlite3.IntegrityError:
+
+                    st.error(
+                        "Điểm đến này đã tồn tại."
+                    )
+
 
 # ============================================================
-# 20. LỊCH SỬ LƯỢT KHÁCH
+# LỊCH SỬ
 # ============================================================
 
 elif menu == "📋 Lịch sử lượt khách":
 
-    st.title(
-        "📋 Lịch sử lượt khách"
-    )
+    st.title("📋 Lịch sử lượt khách")
 
     visits = get_visits()
 
-    if visits.empty:
+    if len(visits) == 0:
 
         st.info(
             "Chưa có dữ liệu lượt khách."
@@ -1917,27 +1336,23 @@ elif menu == "📋 Lịch sử lượt khách":
 
         with col1:
 
-            destinations_filter = [
-                "Tất cả"
-            ] + sorted(
-                visits["destination"]
-                .dropna()
-                .unique()
-                .tolist()
-            )
-
             destination_filter = st.selectbox(
                 "📍 Điểm đến",
-                destinations_filter
+                ["Tất cả"]
+                + sorted(
+                    visits["destination"]
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
             )
 
         with col2:
 
             group_filter = st.selectbox(
-                "👥 Loại khách",
-                [
-                    "Tất cả"
-                ] + sorted(
+                "👥 Nhóm khách",
+                ["Tất cả"]
+                + sorted(
                     visits["visitor_group"]
                     .dropna()
                     .unique()
@@ -1969,282 +1384,78 @@ elif menu == "📋 Lịch sử lượt khách":
             ]
 
         filtered = filtered[
-            pd.to_datetime(
-                filtered["visit_date"]
-            ).dt.date
-            == date_filter
+            filtered["visit_date"]
+            == date_filter.strftime("%Y-%m-%d")
         ]
 
         # ----------------------------------------------------
         # KPI
         # ----------------------------------------------------
 
-        total_people = int(
-            filtered[
-                "number_of_people"
-            ].sum()
-        )
+        total_people = filtered[
+            "number_of_people"
+        ].sum()
 
-        total_groups = len(
-            filtered
-        )
+        total_groups = len(filtered)
 
         c1, c2 = st.columns(2)
 
         c1.metric(
-            "👥 TỔNG KHÁCH",
-            f"{total_people:,}"
+            "👥 Tổng lượt khách",
+            f"{int(total_people):,}"
         )
 
         c2.metric(
-            "🎫 SỐ LƯỢT GHI NHẬN",
+            "🎫 Số lượt ghi nhận",
             total_groups
         )
 
         st.divider()
 
-        # ----------------------------------------------------
-        # BẢNG
-        # ----------------------------------------------------
-
-        show_columns = [
-
-            "id",
-            "destination",
-            "visitor_name",
-            "visitor_group",
-            "number_of_people",
-            "visit_date",
-            "visit_time",
-            "time_slot",
-            "status"
-        ]
-
         st.dataframe(
-            filtered[show_columns],
+            filtered[
+                [
+                    "destination",
+                    "visitor_name",
+                    "visitor_group",
+                    "number_of_people",
+                    "visit_date",
+                    "visit_time",
+                    "time_slot",
+                    "status"
+                ]
+            ],
             use_container_width=True,
             hide_index=True
         )
 
         # ----------------------------------------------------
-        # HỦY LƯỢT KHÁCH
-        # ----------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "🗑️ Hủy lượt ghi nhận"
-        )
-
-        active_visits = filtered[
-            filtered["status"] != "Đã hủy"
-        ]
-
-        if not active_visits.empty:
-
-            visit_options = {}
-
-            for _, row in active_visits.iterrows():
-
-                label = (
-                    f"#{row['id']} - "
-                    f"{row['destination']} - "
-                    f"{row['visitor_name']} - "
-                    f"{row['number_of_people']} người"
-                )
-
-                visit_options[
-                    label
-                ] = int(row["id"])
-
-            selected_visit = st.selectbox(
-                "Chọn lượt cần hủy",
-                list(
-                    visit_options.keys()
-                )
-            )
-
-            if st.button(
-                "🗑️ HỦY LƯỢT KHÁCH",
-                type="secondary"
-            ):
-
-                visit_id = visit_options[
-                    selected_visit
-                ]
-
-                if cancel_visit(
-                    visit_id
-                ):
-
-                    st.success(
-                        "Đã hủy lượt ghi nhận."
-                    )
-
-                    st.rerun()
-
-        st.divider()
-
-        # ----------------------------------------------------
-        # DOWNLOAD CSV
+        # DOWNLOAD
         # ----------------------------------------------------
 
         csv = filtered.to_csv(
             index=False
-        ).encode(
-            "utf-8-sig"
-        )
+        ).encode("utf-8-sig")
 
         st.download_button(
-            "⬇️ XUẤT DỮ LIỆU CSV",
+            "⬇️ Xuất dữ liệu CSV",
             data=csv,
             file_name=(
-                "visitor_data_"
-                + date_filter.strftime(
-                    "%Y%m%d"
-                )
-                + ".csv"
+                f"visitor_data_"
+                f"{date_filter.strftime('%Y%m%d')}.csv"
             ),
             mime="text/csv"
         )
 
 
 # ============================================================
-# 21. DATABASE
-# ============================================================
-
-elif menu == "🗄️ Database":
-
-    st.title(
-        "🗄️ Thông tin Database"
-    )
-
-    st.info(
-        "Trang này dùng để kiểm tra trạng thái "
-        "kết nối giữa Streamlit và Aiven MySQL."
-    )
-
-    version = test_database()
-
-    if version:
-
-        st.success(
-            "🟢 KẾT NỐI MYSQL THÀNH CÔNG"
-        )
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-
-            st.metric(
-                "Database",
-                DB_NAME
-            )
-
-            st.metric(
-                "User",
-                DB_USER
-            )
-
-        with col2:
-
-            st.metric(
-                "Port",
-                DB_PORT
-            )
-
-            st.metric(
-                "MySQL Version",
-                version
-            )
-
-        st.divider()
-
-        st.subheader(
-            "📊 Thống kê Database"
-        )
-
-        destinations = get_destinations()
-
-        visits = get_visits()
-
-        slots = get_time_slots()
-
-        c1, c2, c3 = st.columns(3)
-
-        c1.metric(
-            "📍 Điểm đến",
-            len(destinations)
-        )
-
-        c2.metric(
-            "👥 Lượt ghi nhận",
-            len(visits)
-        )
-
-        c3.metric(
-            "⏰ Khung giờ",
-            len(slots)
-        )
-
-        st.divider()
-
-        st.subheader(
-            "🗃️ Các bảng đang sử dụng"
-        )
-
-        st.write(
-            """
-            **destinations**
-            - Lưu thông tin điểm đến
-            - Sức chứa
-            - Ngưỡng cảnh báo
-            - Trạng thái
-
-            **visits**
-            - Lưu từng lượt khách
-            - Số lượng người
-            - Ngày/giờ đến
-            - Khung giờ
-            - Loại khách
-
-            **time_slots**
-            - Quản lý các khung giờ
-            - Giới hạn khách theo khung giờ
-            """
-        )
-
-        st.divider()
-
-        st.success(
-            "Dữ liệu hiện đang được lưu trực tiếp "
-            "trên Aiven MySQL."
-        )
-
-    else:
-
-        st.error(
-            "🔴 KHÔNG KẾT NỐI ĐƯỢC MYSQL"
-        )
-
-        st.write(
-            "Hãy kiểm tra Host, Port, Username, "
-            "Password và trạng thái Aiven service."
-        )
-
-
-# ============================================================
-# 22. FOOTER
+# FOOTER
 # ============================================================
 
 st.sidebar.divider()
 
 st.sidebar.caption(
     "🌍 Destination Flow Manager"
-)
-
-st.sidebar.caption(
-    "MySQL • Aiven • Streamlit"
 )
 
 st.sidebar.caption(
