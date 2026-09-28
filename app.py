@@ -342,8 +342,7 @@ st.sidebar.title("FLOW MANAGER")
 
 st.sidebar.markdown(
     """
-    **Hệ thống quản lý và giảm tải
-    lượng khách tại điểm đến**
+    **Hệ thống giám sát và điều phối dòng khách tại điểm đến**
     """
 )
 
