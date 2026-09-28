@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, date, time
 from pymysql.cursors import DictCursor
 
-
+st.image("VT2.jpg")
 # ============================================================
 # 1. CẤU HÌNH STREAMLIT
 # ============================================================
