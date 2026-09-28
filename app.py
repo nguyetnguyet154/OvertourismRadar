@@ -1,12 +1,12 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
+import mysql.connector
+from mysql.connector import IntegrityError
 from datetime import datetime, date, time
 
 # ============================================================
 # CẤU HÌNH
 # ============================================================
-st.image("VT2.jpg")
 st.set_page_config(
     page_title="Destination Flow Manager",
     page_icon="🌍",
@@ -14,7 +14,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-DB_NAME = "destination_flow.db"
+st.image("VT2.jpg")
+
 
 
 # ============================================================
@@ -22,167 +23,94 @@ DB_NAME = "destination_flow.db"
 # ============================================================
 
 def get_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return mysql.connector.connect(
+        host=st.secrets["mysql"]["host"],
+        port=int(st.secrets["mysql"]["port"]),
+        user=st.secrets["mysql"]["user"],
+        password=st.secrets["mysql"]["password"],
+        database=st.secrets["mysql"]["database"],
+        ssl_disabled=False,
+        connection_timeout=15
+    )
 
 
 def init_database():
-
     conn = get_connection()
     cursor = conn.cursor()
 
-    # --------------------------------------------------------
-    # BẢNG ĐIỂM ĐẾN
-    # --------------------------------------------------------
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS destinations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            location TEXT NOT NULL,
-            category TEXT NOT NULL,
-            capacity INTEGER NOT NULL,
-            warning_level INTEGER NOT NULL,
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) UNIQUE NOT NULL,
+            location VARCHAR(255) NOT NULL,
+            category VARCHAR(100) NOT NULL,
+            capacity INT NOT NULL,
+            warning_level INT NOT NULL,
             description TEXT,
-            status TEXT DEFAULT 'Hoạt động'
+            status VARCHAR(50) DEFAULT 'Hoạt động'
         )
     """)
-
-    # --------------------------------------------------------
-    # BẢNG LƯỢT KHÁCH
-    # --------------------------------------------------------
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS visits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            destination_id INTEGER NOT NULL,
-            visitor_name TEXT,
-            visitor_group TEXT,
-            number_of_people INTEGER NOT NULL,
-            visit_date TEXT NOT NULL,
-            visit_time TEXT NOT NULL,
-            time_slot TEXT NOT NULL,
-            status TEXT DEFAULT 'Đã ghi nhận',
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(destination_id)
-            REFERENCES destinations(id)
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            destination_id INT NOT NULL,
+            visitor_name VARCHAR(255),
+            visitor_group VARCHAR(100),
+            number_of_people INT NOT NULL,
+            visit_date DATE NOT NULL,
+            visit_time TIME NOT NULL,
+            time_slot VARCHAR(100) NOT NULL,
+            status VARCHAR(50) DEFAULT 'Đã ghi nhận',
+            created_at DATETIME NOT NULL,
+            CONSTRAINT fk_visits_destination
+                FOREIGN KEY (destination_id)
+                REFERENCES destinations(id)
+                ON DELETE CASCADE
         )
     """)
 
-    # --------------------------------------------------------
-    # BẢNG KHUNG GIỜ
-    # --------------------------------------------------------
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS time_slots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            slot_name TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            max_people INTEGER NOT NULL
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            slot_name VARCHAR(100) NOT NULL,
+            start_time VARCHAR(5) NOT NULL,
+            end_time VARCHAR(5) NOT NULL,
+            max_people INT NOT NULL
         )
     """)
 
     conn.commit()
 
-    # --------------------------------------------------------
-    # DỮ LIỆU MẪU
-    # --------------------------------------------------------
-
-    destination_count = cursor.execute(
-        "SELECT COUNT(*) FROM destinations"
-    ).fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM destinations")
+    destination_count = cursor.fetchone()[0]
 
     if destination_count == 0:
-
         destinations = [
-
-            (
-                "Thích Ca Phật Đài",
-                "Vũng Tàu",
-                "Tâm linh",
-                1000,
-                800,
-                "Điểm tham quan tâm linh nổi tiếng tại Vũng Tàu",
-                "Hoạt động"
-            ),
-
-            (
-                "Bãi Sau Vũng Tàu",
-                "Vũng Tàu",
-                "Biển",
-                5000,
-                4000,
-                "Khu vực biển có lượng khách cao vào cuối tuần",
-                "Hoạt động"
-            ),
-
-            (
-                "Hồ Mây Park",
-                "Vũng Tàu",
-                "Vui chơi",
-                3000,
-                2400,
-                "Khu vui chơi và du lịch sinh thái",
-                "Hoạt động"
-            ),
-
-            (
-                "Khu du lịch Bình Châu",
-                "Xuyên Mộc",
-                "Sinh thái",
-                2500,
-                2000,
-                "Khu du lịch sinh thái và nghỉ dưỡng",
-                "Hoạt động"
-            ),
-
-            (
-                "Long Hải",
-                "Long Điền",
-                "Biển",
-                3500,
-                2800,
-                "Điểm du lịch biển và nghỉ dưỡng",
-                "Hoạt động"
-            ),
-
-            (
-                "Hồ Tràm",
-                "Xuyên Mộc",
-                "Nghỉ dưỡng",
-                4000,
-                3200,
-                "Khu vực nghỉ dưỡng ven biển",
-                "Hoạt động"
-            )
+            ("Thích Ca Phật Đài", "Vũng Tàu", "Tâm linh", 1000, 800,
+             "Điểm tham quan tâm linh nổi tiếng tại Vũng Tàu", "Hoạt động"),
+            ("Bãi Sau Vũng Tàu", "Vũng Tàu", "Biển", 5000, 4000,
+             "Khu vực biển có lượng khách cao vào cuối tuần", "Hoạt động"),
+            ("Hồ Mây Park", "Vũng Tàu", "Vui chơi", 3000, 2400,
+             "Khu vui chơi và du lịch sinh thái", "Hoạt động"),
+            ("Khu du lịch Bình Châu", "Xuyên Mộc", "Sinh thái", 2500, 2000,
+             "Khu du lịch sinh thái và nghỉ dưỡng", "Hoạt động"),
+            ("Long Hải", "Long Điền", "Biển", 3500, 2800,
+             "Điểm du lịch biển và nghỉ dưỡng", "Hoạt động"),
+            ("Hồ Tràm", "Xuyên Mộc", "Nghỉ dưỡng", 4000, 3200,
+             "Khu vực nghỉ dưỡng ven biển", "Hoạt động")
         ]
 
         cursor.executemany("""
             INSERT INTO destinations
-            (
-                name,
-                location,
-                category,
-                capacity,
-                warning_level,
-                description,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (name, location, category, capacity, warning_level, description, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, destinations)
 
-    # --------------------------------------------------------
-    # KHUNG GIỜ
-    # --------------------------------------------------------
-
-    slot_count = cursor.execute(
-        "SELECT COUNT(*) FROM time_slots"
-    ).fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM time_slots")
+    slot_count = cursor.fetchone()[0]
 
     if slot_count == 0:
-
         slots = [
             ("Sáng sớm", "06:00", "09:00", 1000),
             ("Buổi sáng", "09:00", "12:00", 1500),
@@ -193,20 +121,21 @@ def init_database():
 
         cursor.executemany("""
             INSERT INTO time_slots
-            (
-                slot_name,
-                start_time,
-                end_time,
-                max_people
-            )
-            VALUES (?, ?, ?, ?)
+            (slot_name, start_time, end_time, max_people)
+            VALUES (%s, %s, %s, %s)
         """, slots)
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
-init_database()
+try:
+    init_database()
+except Exception as e:
+    st.error("❌ Không kết nối được MySQL Aiven.")
+    st.exception(e)
+    st.stop()
 
 
 # ============================================================
@@ -214,25 +143,19 @@ init_database()
 # ============================================================
 
 def get_destinations():
-
     conn = get_connection()
-
-    df = pd.read_sql_query("""
+    df = pd.read_sql("""
         SELECT *
         FROM destinations
         ORDER BY name
     """, conn)
-
     conn.close()
-
     return df
 
 
 def get_visits():
-
     conn = get_connection()
-
-    df = pd.read_sql_query("""
+    df = pd.read_sql("""
         SELECT
             v.id,
             d.name AS destination,
@@ -241,34 +164,27 @@ def get_visits():
             v.visitor_name,
             v.visitor_group,
             v.number_of_people,
-            v.visit_date,
-            v.visit_time,
+            DATE_FORMAT(v.visit_date, '%Y-%m-%d') AS visit_date,
+            TIME_FORMAT(v.visit_time, '%H:%i') AS visit_time,
             v.time_slot,
             v.status,
-            v.created_at
+            DATE_FORMAT(v.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
         FROM visits v
-        JOIN destinations d
-        ON v.destination_id = d.id
+        JOIN destinations d ON v.destination_id = d.id
         ORDER BY v.id DESC
     """, conn)
-
     conn.close()
-
     return df
 
 
 def get_time_slots():
-
     conn = get_connection()
-
-    df = pd.read_sql_query("""
+    df = pd.read_sql("""
         SELECT *
         FROM time_slots
         ORDER BY start_time
     """, conn)
-
     conn.close()
-
     return df
 
 
@@ -277,22 +193,12 @@ def get_time_slots():
 # ============================================================
 
 def get_current_time_slot():
-
     now = datetime.now().time()
-
     slots = get_time_slots()
 
     for _, row in slots.iterrows():
-
-        start = datetime.strptime(
-            row["start_time"],
-            "%H:%M"
-        ).time()
-
-        end = datetime.strptime(
-            row["end_time"],
-            "%H:%M"
-        ).time()
+        start = datetime.strptime(str(row["start_time"])[:5], "%H:%M").time()
+        end = datetime.strptime(str(row["end_time"])[:5], "%H:%M").time()
 
         if start <= now <= end:
             return row["slot_name"]
@@ -305,65 +211,59 @@ def get_current_time_slot():
 # ============================================================
 
 def get_today_visitors():
-
     today = date.today().strftime("%Y-%m-%d")
-
     conn = get_connection()
+    cursor = conn.cursor()
 
-    result = conn.execute("""
+    cursor.execute("""
         SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
-        WHERE visit_date = ?
-    """, (today,)).fetchone()[0]
+        WHERE visit_date = %s
+          AND status != 'Đã hủy'
+    """, (today,))
 
+    result = cursor.fetchone()[0]
+    cursor.close()
     conn.close()
-
     return int(result)
 
 
 def get_destination_visitors(destination_id):
-
     today = date.today().strftime("%Y-%m-%d")
-
     conn = get_connection()
+    cursor = conn.cursor()
 
-    result = conn.execute("""
+    cursor.execute("""
         SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
-        WHERE destination_id = ?
-        AND visit_date = ?
-        AND status != 'Đã hủy'
-    """, (
-        destination_id,
-        today
-    )).fetchone()[0]
+        WHERE destination_id = %s
+          AND visit_date = %s
+          AND status != 'Đã hủy'
+    """, (int(destination_id), today))
 
+    result = cursor.fetchone()[0]
+    cursor.close()
     conn.close()
-
     return int(result)
 
 
 def get_slot_visitors(destination_id, slot_name):
-
     today = date.today().strftime("%Y-%m-%d")
-
     conn = get_connection()
+    cursor = conn.cursor()
 
-    result = conn.execute("""
+    cursor.execute("""
         SELECT COALESCE(SUM(number_of_people), 0)
         FROM visits
-        WHERE destination_id = ?
-        AND time_slot = ?
-        AND visit_date = ?
-        AND status != 'Đã hủy'
-    """, (
-        destination_id,
-        slot_name,
-        today
-    )).fetchone()[0]
+        WHERE destination_id = %s
+          AND time_slot = %s
+          AND visit_date = %s
+          AND status != 'Đã hủy'
+    """, (int(destination_id), slot_name, today))
 
+    result = cursor.fetchone()[0]
+    cursor.close()
     conn.close()
-
     return int(result)
 
 
@@ -399,10 +299,10 @@ def add_visit(
     visit_time,
     time_slot
 ):
-
     conn = get_connection()
+    cursor = conn.cursor()
 
-    conn.execute("""
+    cursor.execute("""
         INSERT INTO visits
         (
             destination_id,
@@ -415,22 +315,21 @@ def add_visit(
             status,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        destination_id,
+        int(destination_id),
         visitor_name,
         visitor_group,
-        number_of_people,
+        int(number_of_people),
         visit_date,
         visit_time,
         time_slot,
         "Đã ghi nhận",
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ))
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
@@ -463,6 +362,14 @@ menu = st.sidebar.radio(
 )
 
 st.sidebar.divider()
+
+try:
+    test_conn = get_connection()
+    if test_conn.is_connected():
+        st.sidebar.success("🟢 Đã cấu hình MySQL Aiven")
+    test_conn.close()
+except Exception:
+    st.sidebar.error("🔴 Chưa kết nối MySQL Aiven")
 
 st.sidebar.info(
     "💡 Mục tiêu:\n\n"
@@ -1271,8 +1178,9 @@ elif menu == "📍 Quản lý điểm đến":
                 try:
 
                     conn = get_connection()
+                    cursor = conn.cursor()
 
-                    conn.execute("""
+                    cursor.execute("""
                         INSERT INTO destinations
                         (
                             name,
@@ -1283,18 +1191,19 @@ elif menu == "📍 Quản lý điểm đến":
                             description,
                             status
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """, (
                         name.strip(),
                         location.strip(),
                         category,
-                        capacity,
-                        warning_level,
+                        int(capacity),
+                        int(warning_level),
                         description,
                         "Hoạt động"
                     ))
 
                     conn.commit()
+                    cursor.close()
                     conn.close()
 
                     st.success(
@@ -1303,7 +1212,7 @@ elif menu == "📍 Quản lý điểm đến":
 
                     st.rerun()
 
-                except sqlite3.IntegrityError:
+                except IntegrityError:
 
                     st.error(
                         "Điểm đến này đã tồn tại."
