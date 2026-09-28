@@ -6,7 +6,7 @@ from datetime import datetime, date, time
 # ============================================================
 # CẤU HÌNH
 # ============================================================
-
+st.image("VT2.jpg")
 st.set_page_config(
     page_title="Destination Flow Manager",
     page_icon="🌍",
