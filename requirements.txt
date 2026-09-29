@@ -1,4 +1,4 @@
 streamlit
-mysql-connector-python
-pandas
 openai
+pandas
+mysql-connector-python
