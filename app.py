@@ -1766,22 +1766,208 @@ Yêu cầu:
                         }
                     )
 
-            except Exception as e:
-                error_text = str(e)
+           import streamlit as st
+from openai import OpenAI
 
-                if "insufficient_quota" in error_text.lower():
-                    st.error(
-                        "API hiện chưa có đủ quota/credits. "
-                        "Bạn cần kiểm tra Billing trên OpenAI Platform."
-                    )
-                elif "invalid_api_key" in error_text.lower():
-                    st.error(
-                        "OPENAI_API_KEY không hợp lệ. "
-                        "Hãy kiểm tra lại Streamlit Secrets."
-                    )
-                else:
-                    st.error("Không gọi được OpenAI API.")
-                    st.code(error_text)
+# =========================
+# OPENAI CLIENT
+# =========================
+try:
+    api_key = st.secrets["OPENAI_API_KEY"]
+
+    if not api_key:
+        st.error("Chưa nhập OPENAI_API_KEY trong Streamlit Secrets.")
+        st.stop()
+
+    client = OpenAI(api_key=api_key)
+
+except Exception as e:
+    st.error(f"Lỗi cấu hình OpenAI: {e}")
+    st.stop()
+
+
+# =========================
+# CHATBOT
+# =========================
+
+st.subheader("🤖 Trợ lý du lịch Vũng Tàu")
+
+# Lưu lịch sử chat
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Xin chào! 👋 Tôi là trợ lý du lịch Vũng Tàu. "
+                "Bạn có thể hỏi tôi về địa điểm du lịch, món ăn, "
+                "đặc sản, lịch trình hoặc các tour tại Vũng Tàu."
+            )
+        }
+    ]
+
+
+# Hiển thị lịch sử
+for message in st.session_state.messages:
+
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+
+# Ô nhập câu hỏi
+prompt = st.chat_input(
+    "Bạn muốn hỏi gì về Vũng Tàu?"
+)
+
+
+if prompt:
+
+    # Hiển thị câu hỏi của khách
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": prompt
+        }
+    )
+
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+
+    # =========================
+    # GỌI OPENAI
+    # =========================
+
+    with st.chat_message("assistant"):
+
+        try:
+
+            # Chỉ gửi lịch sử cần thiết
+            history = []
+
+            for message in st.session_state.messages:
+
+                history.append(
+                    {
+                        "role": message["role"],
+                        "content": message["content"]
+                    }
+                )
+
+
+            response = client.responses.create(
+
+                # Model
+                model="gpt-5.5",
+
+                # Hướng dẫn chatbot
+                instructions="""
+Bạn là trợ lý du lịch chuyên về Vũng Tàu.
+
+Hãy trả lời bằng tiếng Việt, thân thiện, dễ hiểu
+và ngắn gọn.
+
+Bạn có thể hỗ trợ khách:
+- Địa điểm du lịch Vũng Tàu
+- Địa điểm chụp ảnh đẹp
+- Món ăn ngon
+- Đặc sản Vũng Tàu
+- Gợi ý lịch trình
+- Tour du lịch
+- Kinh nghiệm tham quan
+- Gợi ý địa điểm phù hợp với gia đình, nhóm bạn
+- Tư vấn thời gian tham quan
+
+Nếu không chắc chắn về thông tin, hãy nói rõ
+thay vì tự bịa thông tin.
+
+Ưu tiên đưa ra câu trả lời thực tế cho khách du lịch.
+""",
+
+                # Lịch sử hội thoại
+                input=history,
+
+                # Giới hạn câu trả lời
+                max_output_tokens=800
+            )
+
+
+            # Lấy nội dung trả lời
+            answer = response.output_text
+
+
+            # Kiểm tra câu trả lời
+            if not answer:
+
+                answer = (
+                    "Xin lỗi, hiện tại tôi chưa nhận được "
+                    "câu trả lời từ hệ thống."
+                )
+
+
+            # Hiển thị
+            st.markdown(answer)
+
+
+            # Lưu vào lịch sử
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer
+                }
+            )
+
+
+        # =========================
+        # XỬ LÝ LỖI
+        # =========================
+
+        except Exception as e:
+
+            error_text = str(e)
+
+            if "insufficient_quota" in error_text.lower():
+
+                st.error(
+                    "⚠️ Tài khoản OpenAI hiện không còn quota/credits."
+                )
+
+                st.info(
+                    "Hãy kiểm tra Billing và API usage "
+                    "trên OpenAI Platform."
+                )
+
+
+            elif (
+                "invalid api key" in error_text.lower()
+                or "authentication" in error_text.lower()
+            ):
+
+                st.error(
+                    "❌ OPENAI_API_KEY không hợp lệ."
+                )
+
+                st.info(
+                    "Hãy kiểm tra lại OPENAI_API_KEY "
+                    "trong Streamlit Secrets."
+                )
+
+
+            elif "model" in error_text.lower():
+
+                st.error(
+                    "❌ Model OpenAI không khả dụng."
+                )
+
+                st.code(error_text)
+
+
+            else:
+
+                st.error(
+                    "❌ Không gọi được OpenAI API."
+                )
+
+                st.code(error_text)
 
 
 # ============================================================
